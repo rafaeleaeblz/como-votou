@@ -12,7 +12,7 @@ Página estática para consultar votações nominais abertas do Plenário da Câ
 
 ## Uso e integração
 
-Escolha a Casa, a data, clique em buscar, selecione a votação e gere o infográfico. Há 3 abas: seleção, resultado por partido e lista nominal. Os downloads Excel (.xlsx) e CSV são produzidos no navegador. Não há armazenamento de dados pessoais nem credenciais no projeto. Cada busca tenta acessar as fontes oficiais sem cache próprio. Não há atualização diária fixa, mas a publicação na API pode atrasar em relação ao painel do Plenário. O sistema bloqueia listas incompletas de datas passadas em vez de usar a composição atual indevidamente. A consulta pode incluir votações simbólicas, recusadas na geração quando identificadas ou quando os votos são insuficientes. A coluna “ausentes + abstenção” inclui todos os registros diferentes de sim e não, conforme nota explicativa.
+Escolha a Casa, a data, clique em buscar, selecione a votação e gere o infográfico. Há 3 abas: seleção, resultado por partido e lista nominal. Os downloads Excel (.xlsx) e CSV são produzidos no navegador. Não há armazenamento de dados pessoais nem credenciais no projeto. Cada busca tenta acessar as fontes oficiais sem cache próprio. Não há atualização diária fixa, mas a publicação na API pode atrasar em relação ao painel do Plenário. Na Câmara, a composição é consultada na data oficial da votação quando faltam parlamentares; a geração é bloqueada se houver divergência de ID, partido, UF ou total. No Senado, listas históricas incompletas continuam bloqueadas. O seletor usa proposições afetadas, objetos possíveis e descrição da abertura da votação, sem presumir um projeto quando a fonte não o identifica. A consulta pode incluir votações simbólicas, recusadas na geração quando identificadas ou quando os votos são insuficientes. A coluna “ausentes + abstenção” inclui todos os registros diferentes de sim e não, conforme nota explicativa.
 
 Para conferir a aparência sem depender das APIs, acrescente `?demo=1` à URL, ou abra `index.html` localmente junto com os demais arquivos. A demonstração usa apenas os totais do print de referência e não tem votos nominais fictícios.
 
@@ -29,3 +29,6 @@ O GitHub Pages só hospeda arquivos estáticos. Por padrão, o navegador consult
 Depois de publicado e testado, use um iframe com largura 100%, altura inicial suficiente e título acessível. `?hideHeader=true` oculta a marca do cabeçalho caso ela já esteja presente na matéria; os créditos permanecem. O iframe não redimensiona automaticamente sem integração adicional no CMS.
 
 Fontes: https://dadosabertos.camara.leg.br/swagger/api.html e https://legis.senado.leg.br/dadosabertos/docs/.
+
+## Atualização V2
+Substitua `api.js` e `index.html` na raiz do GitHub. O `index.html` contém `noindex, nofollow` e força o carregamento da versão atualizada do JS. Nenhuma alteração em `config.js` ou na logo é necessária.
