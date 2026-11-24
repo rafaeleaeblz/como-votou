@@ -1,2 +1,3 @@
-// Opcional: URL HTTPS do seu próprio proxy, caso alguma API bloqueie CORS.
+// Cole entre as aspas a URL HTTPS do Worker publicado (sem /?url=...).
+// Em branco: consulta direta, sujeita a CORS e instabilidade da API.
 const VOTE_PROXY = "";

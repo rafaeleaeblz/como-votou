@@ -5,10 +5,15 @@ const CAM='https://dadosabertos.camara.leg.br/api/v2', SEN='https://legis.senado
 const txt=x=>String(x==null?'':x).trim(), norm=x=>txt(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ');
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 
+// O proxy próprio, quando configurado, é a rota preferencial. Nenhum proxy público.
+const pause_=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function proxy_(){const value=typeof VOTE_PROXY==='string'?VOTE_PROXY.trim():'';if(!value)return '';let u;try{u=new URL(value);}catch{throw Error('Endereço da ponte inválido em config.js.');}if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw Error('Configure uma URL HTTPS válida da ponte em config.js.');return u.href.replace(/\/$/,'');}
 async function fetch_(url,accept){
-  const headers={Accept:accept||'application/json'};
-  const request=async (target)=>{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),18000);try{const r=await fetch(target,{headers,cache:'no-store',signal:controller.signal,credentials:'omit'});const body=await r.text();if(!r.ok)throw Error('HTTP '+r.status+' em '+url+' | '+body.replace(/\s+/g,' ').slice(0,220));return body;}finally{clearTimeout(timer);}};
-  try{return await request(url);}catch(e){if(e instanceof TypeError||e.name==='AbortError'){if(typeof VOTE_PROXY==='string'&&VOTE_PROXY.trim())return await request(VOTE_PROXY.replace(/\/$/,'')+'/?url='+encodeURIComponent(url));throw Error('Não foi possível acessar a API pelo navegador (rede ou CORS). Tente novamente. Se persistir, configure a ponte opcional descrita no README.');}throw e;}
+ const headers={Accept:accept||'application/json'},proxy=proxy_();
+ const request=async(target)=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);try{const r=await fetch(target,{headers,cache:'no-store',signal:controller.signal,credentials:'omit'});const body=await r.text();if(!r.ok){let e=Error('HTTP '+r.status+' em '+url+' | '+body.replace(/\s+/g,' ').slice(0,220));e.status=r.status;throw e;}return body;}finally{clearTimeout(timer);}};
+ const transient=e=>e instanceof TypeError||e.name==='AbortError'||[408,425,429,500,502,503,504].includes(e.status);
+ const target=proxy?proxy+'/?url='+encodeURIComponent(url):url;
+ try{return await request(target);}catch(e){if(!transient(e))throw e;await pause_(350);try{return await request(target);}catch(second){if(!transient(second))throw second;if(proxy){try{return await request(url);}catch(direct){throw Error('Falha na ponte e na consulta direta: '+url+' | '+second.message+' | '+direct.message);}}throw Error('Falha de acesso à API (rede, CORS ou instabilidade): '+url+'. Configure a ponte própria indicada no README.');}}
 }
 async function json_(url){return JSON.parse(await fetch_(url));}
 async function pages_(url){let rows=[],seen=new Set();while(url){if(seen.has(url)||seen.size>=40)throw Error('Paginação incompleta; reduza o período.');if(!url.startsWith(CAM+'/'))throw Error('Link de paginação inesperado.');seen.add(url);let o=(await json_(url));if(!Array.isArray(o.dados))throw Error('Formato inesperado da Câmara.');rows.push(...o.dados);let n=(o.links||[]).find(x=>x.rel==='next');url=n?n.href:null;}return rows;}
@@ -50,7 +55,7 @@ function camTitle_(root,base){
 }
 async function enrichCam_(items,warnings){
  let cursor=0,failed=0;
- async function task(){while(cursor<items.length){const x=items[cursor++];try{const r=(await json_(CAM+'/votacoes/'+encodeURIComponent(x.id))).dados;if(!r||typeof r!=='object')throw Error('detalhe inválido');x.title=camTitle_(r,x.base);x.contextAvailable=true;}catch(e){failed++;x.title='Projeto não identificado — '+x.title; }delete x.base;}}
+ async function task(){while(cursor<items.length){const x=items[cursor++];try{const r=(await json_(CAM+'/votacoes/'+encodeURIComponent(x.id))).dados;if(!r||typeof r!=='object')throw Error('detalhe inválido');x.title=camTitle_(r,x.base);x.contextAvailable=true;}catch(e){failed++;/* manter os metadados já obtidos na listagem */ }delete x.base;}}
  await Promise.all(Array.from({length:Math.min(4,items.length)},task));
  if(failed)warnings.push('Não foi possível identificar o projeto de '+failed+' votação(ões).');
 }
@@ -65,11 +70,14 @@ function senId_(v){return field_(v,'CodigoSessaoVotacao','CodigoVotacao')||[fiel
 function senMat_(v){return field_(v,'DescricaoIdentificacaoMateria')||[field_(v,'SiglaMateria'),[field_(v,'NumeroMateria'),field_(v,'AnoMateria')].filter(Boolean).join('/')].filter(Boolean).join(' ');}
 function senData_(v){let d=field_(v,'DataSessao','DataVotacao');return d.slice(0,10);}
 // A consulta da sessão complementa a listagem geral; não é uma fonte independente.
-async function camRecent_(a,b){let rows=[],errors=[],events=[];let start=new Date(b+'T12:00:00Z');start.setUTCDate(start.getUTCDate()-2);let from=start.toISOString().slice(0,10);if(from<a)from=a;
- try{rows.push(...(await pages_(CAM+'/votacoes?dataInicio='+b+'&dataFim='+b+'&idOrgao=180&itens=100')));}catch(e){errors.push('consulta diária: '+e.message.slice(0,100));}
- try{events=(await pages_(CAM+'/orgaos/180/eventos?dataInicio='+from+'&dataFim='+b+'&itens=100'));}catch(e){errors.push('sessões: '+e.message.slice(0,100));}
- for(const ev of events){let id=field_(ev,'id');let day=field_(ev,'dataHoraInicio').slice(0,10);if(!id||(day&&(day<from||day>b)))continue;try{let vs=(await pages_(CAM+'/eventos/'+encodeURIComponent(id)+'/votacoes'));for(const v of vs)if(norm(v.siglaOrgao)==='PLEN'||String(v.idOrgao)==='180')rows.push(v);}catch(e){errors.push('sessão '+id+': '+e.message.slice(0,100));}}
- return {rows,notice:'Busca complementar: '+events.length+' sessão(ões), '+rows.length+' registro(s) antes de remover duplicatas.'+(errors.length?' Avisos: '+errors.join('; '):'')};}
+async function camRecent_(day){
+ const warnings=[],rows=[];let events=[],succeeded=0;
+ try{events=await pages_(CAM+'/orgaos/180/eventos?dataInicio='+day+'&dataFim='+day+'&itens=100');}catch(e){warnings.push('Lista de sessões: '+e.message);return {rows,warnings,succeeded,events:0};}
+ for(const ev of events){const id=field_(ev,'id'),d=field_(ev,'dataHoraInicio').slice(0,10);if(!id||(d&&d!==day))continue;
+  try{const vs=await pages_(CAM+'/eventos/'+encodeURIComponent(id)+'/votacoes');succeeded++;for(const v of vs){if((v.siglaOrgao||v.idOrgao)&&norm(v.siglaOrgao)!=='PLEN'&&String(v.idOrgao)!=='180')continue;rows.push({...v,_sessionDay:day,_plenary:true});}}catch(e){warnings.push('Sessão '+id+': '+e.message);}
+ }
+ return {rows,warnings,succeeded,events:events.length};
+}
 
 async function roster_(h,day){if(h==='Câmara')return (await pages_(CAM+'/deputados?dataInicio='+day+'&dataFim='+day+'&itens=100&ordem=ASC&ordenarPor=nome')).map(v=>[txt(v.nome),party_(v.siglaPartido),txt(v.siglaUf),txt(v.id)]);let j=(await json_(SEN+'/senador/lista/atual.json'));return walk_(j,'Parlamentar').map(v=>v.IdentificacaoParlamentar||v).map(v=>[field_(v,'NomeParlamentar','NomeCompletoParlamentar'),party_(field_(v,'SiglaPartidoParlamentar','SiglaPartido')),field_(v,'UfParlamentar','SiglaUF','UF'),field_(v,'CodigoParlamentar')]);}
 function record_(name,p,uf,v,id,source){return [txt(name),party_(p),txt(uf).toUpperCase(),vote_(v),txt(id),txt(v),source];}
@@ -104,10 +112,13 @@ async function listVotes(h,day){
  check_(h,day);let items=[],warnings=[];
  if(h==='Câmara'){
   let raw=[],ok=false;
-  try{raw=(await pages_(CAM+'/votacoes?dataInicio='+day+'&dataFim='+day+'&idOrgao=180&itens=100&ordem=DESC&ordenarPor=dataHoraRegistro'));ok=true;}catch(e){warnings.push('Consulta geral: '+e.message);}
-  let extra=(await camRecent_(day,day));raw=raw.concat(extra.rows);if(!ok&&!raw.length)throw Error('Não foi possível obter a lista da Câmara. '+warnings.join(' '));
-  if(extra.notice.includes('Avisos:'))warnings.push(extra.notice);
-  for(const v of raw){let id=camId_(v),d=field_(v,'data','dataHoraRegistro').slice(0,10);if(!id||d!==day||(norm(v.siglaOrgao)!=='PLEN'&&String(v.idOrgao)!=='180'))continue;let desc=field_(v,'descricao')||'Votação sem descrição';if(/vota[cç][aã]o\s+simb[oó]lica|processo\s+simb[oó]lico/i.test(desc))continue;items.push({id,aux:'',title:desc,time:field_(v,'dataHoraRegistro'),day,base:v});}
+  // Consulta geral com os parâmetros mínimos já usados pela planilha.
+  try{raw=await pages_(CAM+'/votacoes?dataInicio='+day+'&dataFim='+day+'&idOrgao=180&itens=100');ok=true;}catch(e){warnings.push('Consulta geral: '+e.message);}
+  // A listagem geral pode atrasar. Consulta independente por sessão do Plenário.
+  const extra=await camRecent_(day);raw=raw.concat(extra.rows);warnings.push(...extra.warnings);
+  for(const v of raw){let id=camId_(v),d=field_(v,'data').slice(0,10)||v._sessionDay||field_(v,'dataHoraRegistro').slice(0,10);if(!id||d!==day||(!v._plenary&&norm(v.siglaOrgao)!=='PLEN'&&String(v.idOrgao)!=='180'))continue;let desc=field_(v,'descricao')||'Votação sem descrição';if(/vota[cç][aã]o\s+simb[oó]lica|processo\s+simb[oó]lico/i.test(desc))continue;items.push({id,aux:'',title:camTitle_(v,v),time:field_(v,'dataHoraRegistro'),day,base:v});}
+  if(!items.length&&warnings.length)throw Error('Não foi possível confirmar as votações de '+day+'. '+warnings.join(' | '));
+  if(!ok&&!extra.succeeded&&!items.length)throw Error('Nenhuma rota de consulta confirmou a lista de votações.');
  }else{
   let s=(await senate_(day,day));for(const v of s.records){let id=senId_(v),d=senData_(v);if(!id||d!==day)continue;items.push({id,aux:field_(v,'CodigoSessao'),title:[senMat_(v),field_(v,'DescricaoVotacao'),field_(v,'Resultado')].filter(Boolean).join(' — '),time:field_(v,'HoraInicioVotacao','HoraVotacao','HoraSessao'),day});}
  }

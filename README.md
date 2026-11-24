@@ -32,3 +32,19 @@ Fontes: https://dadosabertos.camara.leg.br/swagger/api.html e https://legis.sena
 
 ## Atualização V2
 Substitua `api.js` e `index.html` na raiz do GitHub. O `index.html` contém `noindex, nofollow` e força o carregamento da versão atualizada do JS. Nenhuma alteração em `config.js` ou na logo é necessária.
+
+## V3 — falha de rede/CORS e lista vazia
+
+A V3 evita repetir a mesma consulta diária, tenta novamente em falhas transitórias e consulta as sessões do Plenário. Uma falha de acesso não é apresentada como ausência de votação. Mantém o enriquecimento de títulos da V2 e os controles de placar. Se a ponte estiver configurada, ela passa a ser a primeira rota de consulta.
+
+### Instalação recomendada da ponte no Cloudflare Workers
+
+1. Acesse https://dash.cloudflare.com/ e abra Workers & Pages (Compute & AI).
+2. Crie um Worker (Hello World), por exemplo `como-votou-api`, e publique.
+3. Abra Edit code, substitua o código pelo arquivo `opcional/worker.js` deste pacote e clique em Deploy.
+4. Abra a URL HTTPS exibida pelo Cloudflare: o retorno esperado é `{"ok":true,"servico":"Como votou — Poder360","versao":3}`. Esse teste só comprova a instalação, não o acesso às APIs.
+5. Edite `config.js`: coloque a URL HTTPS real do Worker entre as aspas em `const VOTE_PROXY = "";`. Não adicione parâmetros nem a rota `/?url=`.
+6. No repositório https://github.com/rafaeleaeblz/como-votou, substitua `index.html`, `api.js`, `config.js` e `README.md`. A logo permanece. O Worker é publicado no Cloudflare, não executado pelo GitHub Pages.
+7. Reabra https://rafaeleaeblz.github.io/como-votou/ depois do deploy do GitHub e teste Câmara, 23/11/2026, PLP 299/2026. Em seguida, teste Senado. A ponte aceita chamadas do domínio do GitHub Pages e restringe rotas oficiais; CORS não é autenticação. Para uso público intenso, aplique cotas/rate limiting e monitore os limites do provedor.
+
+A ponte consulta a fonte a cada requisição; não é uma atualização diária. Não contorna indisponibilidade dos próprios órgãos. As consultas reais precisam ser validadas depois da implantação; os testes locais usam respostas simuladas.
