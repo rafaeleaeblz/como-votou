@@ -1,3 +1,2 @@
-// Cole entre as aspas a URL HTTPS do Worker publicado (sem /?url=...).
-// Em branco: consulta direta, sujeita a CORS e instabilidade da API.
-const VOTE_PROXY = "";
+// Ponte própria para as APIs oficiais.
+const VOTE_PROXY = "https://como-votou-api.rafaelbqo.workers.dev";
