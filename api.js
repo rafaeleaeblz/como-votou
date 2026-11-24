@@ -30,32 +30,46 @@ function propLabel_(p){
   if(!p||typeof p!=='object')return '';
   const q=p.proposicao||p;
   const type=field_(q,'siglaTipo','tipo'),num=field_(q,'numero'),year=field_(q,'ano');
-  if(type&&num&&year)return type+' '+num+'/'+year;
+  if(type&&num&&/^\d{4}$/.test(year)&&Number(year)>0)return type+' '+num+'/'+year;
   return field_(q,'descricaoIdentificacao','identificacao');
 }
 function propEntries_(a){return (Array.isArray(a)?a:a?[a]:[]).filter(x=>x&&typeof x==='object');}
 function mainProp_(x){return /^(PL|PLP|PEC|MPV|PDC|PDL|PRC|PRN|PLN|PLC|PLS|PRS|PDS|PLV|PFC|PLOA|PLDO)\s/i.test(x);}
-function camTitle_(root,base){
- const desc=field_(root,'descricao')||field_(base,'descricao')||'Votação sem descrição';
- const opening=field_(root.ultimaAberturaVotacao,'descricao');
- const affected=[...new Set(propEntries_(root.proposicoesAfetadas).map(propLabel_).filter(Boolean))];
- const objects=[...new Set(propEntries_(root.objetosPossiveis).map(propLabel_).filter(Boolean))];
- // A lista de afetadas é contexto, não prova de que o projeto principal foi o objeto efetivamente votado.
- const mains=[...new Set([...affected,...objects].filter(mainProp_))];
- const context=mains.length?mains:affected.length?affected:objects;
- const parts=[];
- if(context.length)parts.push(context.join(' / '));
- const accessories=objects.filter(x=>!context.includes(x));
- if(accessories.length)parts.push('objeto(s) possível(is): '+accessories.join(' / '));
- // A abertura costuma indicar número de destaque, emenda ou requerimento.
- if(opening&&norm(opening)!==norm(desc))parts.push(opening.replace(/\s+/g,' '));
- if(!parts.length)parts.push('Projeto não identificado nos metadados');
- parts.push(desc.replace(/\s+/g,' '));
- return parts.join(' — ');
+// Exiba o projeto principal como contexto, nunca o catálogo de emendas possíveis.
+function camTitle_(root,base,compact=false){
+ const clean=x=>txt(x).replace(/\s+/g,' ');
+ const desc=clean(field_(root,'descricao')||field_(base,'descricao')||'Votação sem descrição');
+ const opening=clean(field_(root.ultimaAberturaVotacao,'descricao')||field_(root,'descUltimaAberturaVotacao'));
+ const affected=[...new Set(propEntries_(root.proposicoesAfetadas||base.proposicoesAfetadas).map(propLabel_).filter(Boolean))];
+ const objects=[...new Set(propEntries_(root.objetosPossiveis||base.objetosPossiveis).map(propLabel_).filter(Boolean))];
+ const mainAffected=affected.filter(mainProp_),mainObjects=objects.filter(mainProp_);
+ // Quando houver mais de um projeto, indique o contexto múltiplo, sem escolher arbitrariamente.
+ const mains=mainAffected.length?mainAffected:mainObjects;
+ let context=mains.length?mains.slice(0,2).join(' / ')+(mains.length>2?' + '+(mains.length-2)+' projetos':''):'';
+ if(!context){
+  const m=desc.match(/\b(PLP|PEC|PL|MPV|PDL|PDC|PRC|PRN|PLN|PLC|PLS|PRS|PDS|PLV)\s+(?:n[º°o.]\s*)?(\d+)\s*\/\s*(\d{4})\b/i)||desc.match(/\b(Projeto de Lei Complementar|Projeto de Lei|Proposta de Emenda [àa] Constitui[cç][ãa]o|Medida Provis[oó]ria|Projeto de Decreto Legislativo)\s+n[º°o.]?\s*(\d+)\s*,?\s*de\s*(\d{4})/i);
+  if(m){const types={'PROJETO DE LEI COMPLEMENTAR':'PLP','PROJETO DE LEI':'PL','PROPOSTA DE EMENDA A CONSTITUICAO':'PEC','MEDIDA PROVISORIA':'MPV','PROJETO DE DECRETO LEGISLATIVO':'PDL'};context=(types[norm(m[1])]||m[1].toUpperCase())+' '+m[2]+'/'+m[3];}
+ }
+ // Um objeto possível não é confirmação do que foi votado.
+ if(!context)context='Projeto não identificado';
+ let result=desc;
+ if(compact){
+  // Preserve a descrição do resultado; compacte somente o placar textual.
+  const yes=desc.match(/\bSim\s*:\s*(\d+)/i),no=desc.match(/\bN[aã]o\s*:\s*(\d+)/i),abst=desc.match(/\bAbsten[cç][ãa]o(?:es)?\s*:\s*(\d+)/i);
+  if(yes&&no){result=desc.replace(/\s*(?:Sim|N[aã]o|Absten[cç][ãa]o(?:es)?|Total)\s*:\s*\d+\s*[;,.]?/gi,' ').replace(/\s+/g,' ').trim().replace(/[.;,]+$/,'');}
+  // Apenas quando a abertura explicita um único destaque/emenda numerado,
+  // use-o como contexto adicional (não inferir pelo conjunto de objetos possíveis).
+  if(/^mantido o texto[.!]?$/i.test(result)&&opening){
+   const refs=[...opening.matchAll(/\b(emenda(?: de plen[aá]rio)?|destaque)\s*(?:n[º°o.]?\s*)?(\d+)\b/gi)];
+   if(refs.length===1)result+=' (abertura: '+refs[0][1].toLowerCase()+' nº '+refs[0][2]+')';
+  }
+  if(yes&&no)result+=' · '+yes[1]+' sim × '+no[1]+' não'+(abst&&Number(abst[1])?' · '+abst[1]+' abst.':'');
+ }
+ return context+' — '+result;
 }
 async function enrichCam_(items,warnings){
  let cursor=0,failed=0;
- async function task(){while(cursor<items.length){const x=items[cursor++];try{const r=(await json_(CAM+'/votacoes/'+encodeURIComponent(x.id))).dados;if(!r||typeof r!=='object')throw Error('detalhe inválido');x.title=camTitle_(r,x.base);x.contextAvailable=true;}catch(e){failed++;/* manter os metadados já obtidos na listagem */ }delete x.base;}}
+ async function task(){while(cursor<items.length){const x=items[cursor++];try{const r=(await json_(CAM+'/votacoes/'+encodeURIComponent(x.id))).dados;if(!r||typeof r!=='object')throw Error('detalhe inválido');x.title=camTitle_(r,x.base,true);x.contextAvailable=true;}catch(e){failed++;/* manter os metadados já obtidos na listagem */ }delete x.base;}}
  await Promise.all(Array.from({length:Math.min(4,items.length)},task));
  if(failed)warnings.push('Não foi possível identificar o projeto de '+failed+' votação(ões).');
 }
@@ -116,7 +130,7 @@ async function listVotes(h,day){
   try{raw=await pages_(CAM+'/votacoes?dataInicio='+day+'&dataFim='+day+'&idOrgao=180&itens=100');ok=true;}catch(e){warnings.push('Consulta geral: '+e.message);}
   // A listagem geral pode atrasar. Consulta independente por sessão do Plenário.
   const extra=await camRecent_(day);raw=raw.concat(extra.rows);warnings.push(...extra.warnings);
-  for(const v of raw){let id=camId_(v),d=field_(v,'data').slice(0,10)||v._sessionDay||field_(v,'dataHoraRegistro').slice(0,10);if(!id||d!==day||(!v._plenary&&norm(v.siglaOrgao)!=='PLEN'&&String(v.idOrgao)!=='180'))continue;let desc=field_(v,'descricao')||'Votação sem descrição';if(/vota[cç][aã]o\s+simb[oó]lica|processo\s+simb[oó]lico/i.test(desc))continue;items.push({id,aux:'',title:camTitle_(v,v),time:field_(v,'dataHoraRegistro'),day,base:v});}
+  for(const v of raw){let id=camId_(v),d=field_(v,'data').slice(0,10)||v._sessionDay||field_(v,'dataHoraRegistro').slice(0,10);if(!id||d!==day||(!v._plenary&&norm(v.siglaOrgao)!=='PLEN'&&String(v.idOrgao)!=='180'))continue;let desc=field_(v,'descricao')||'Votação sem descrição';if(/vota[cç][aã]o\s+simb[oó]lica|processo\s+simb[oó]lico/i.test(desc))continue;items.push({id,aux:'',title:camTitle_(v,v,true),time:field_(v,'dataHoraRegistro'),day,base:v});}
   if(!items.length&&warnings.length)throw Error('Não foi possível confirmar as votações de '+day+'. '+warnings.join(' | '));
   if(!ok&&!extra.succeeded&&!items.length)throw Error('Nenhuma rota de consulta confirmou a lista de votações.');
  }else{
@@ -128,13 +142,18 @@ async function listVotes(h,day){
 }
 async function getVote(h,day,id,aux){
  check_(h,day);if(typeof id!=='string'||!/^[0-9]+(?:-[0-9]+)*$/.test(id)||id.length>70||typeof aux!=='string'||!/^\d*$/.test(aux))throw Error('Identificador inválido.');
- let rows=[],yes='',no='',description='',source='',criterion='Lista nominal completa da data';
+ let rows=[],yes='',no='',description='',source='',criterion='Lista nominal completa da data',partial=false,rosterWarning='',rosterDay=day;
  if(h==='Câmara'){
   const url=CAM+'/votacoes/'+encodeURIComponent(id),root=(await json_(url)).dados;
   if(!root||(norm(root.siglaOrgao)!=='PLEN'&&String(root.idOrgao)!=='180')||field_(root,'data','dataHoraRegistro').slice(0,10)!==day)throw Error('Votação não pertence ao Plenário ou à data selecionada.');
   description=field_(root,'descricao')||'Votação nominal';if(/vota[cç][aã]o\s+simb[oó]lica|processo\s+simb[oó]lico/i.test(description))throw Error('Votação simbólica: selecione outra.');
   description=camTitle_(root,root);
-  rows=(await camVotes_(url)).map(v=>{let r=v.deputado_||v.deputado||{};return record_(r.nome,r.siglaPartido,r.siglaUf,v.tipoVoto,r.id,url+'/votos');});yes=camOfficial_(root,'sim');no=camOfficial_(root,'não');source=url+'/votos';
+  const rawVotes=await camVotes_(url);
+  // Use a data civil do último voto registrado, não a hora de registro da tramitação.
+  const nextDay=new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10);
+  const voteDays=rawVotes.map(v=>field_(v,'dataHoraVoto').slice(0,10)).filter(d=>d===day||d===nextDay);
+  if(voteDays.includes(nextDay)&&nextDay<=today())rosterDay=nextDay;
+  rows=rawVotes.map(v=>{let r=v.deputado_||v.deputado||{};return record_(r.nome,r.siglaPartido,r.siglaUf,v.tipoVoto,r.id,url+'/votos');});yes=camOfficial_(root,'sim');no=camOfficial_(root,'não');source=url+'/votos';
  }else{
   let s=(await senate_(day,day)),v=s.records.find(x=>senId_(x)===id&&(!aux||field_(x,'CodigoSessao')===aux));if(!v)throw Error('Votação não localizada. Atualize a lista.');
   rows=walk_(v,'VotoParlamentar').map(x=>{let p=x.IdentificacaoParlamentar||x;return record_(field_(p,'NomeParlamentar'),field_(p,'SiglaPartido','SiglaPartidoParlamentar'),field_(p,'SiglaUF','UfParlamentar'),field_(x,'Voto','SiglaVoto'),field_(p,'CodigoParlamentar'),s.url);});
@@ -143,11 +162,24 @@ async function getVote(h,day,id,aux){
  rows=unique_(rows);if(!rows.some(r=>['Sim','Não'].includes(r[3])))throw Error('Não há votos nominais disponíveis. Pode ser votação simbólica ou dados ainda não publicados.');
  if(h==='Câmara'&&(yes===''||no==='')&&rows.filter(r=>['Sim','Não','Abstenção','Obstrução'].includes(r[3])).length<257)throw Error('Lista nominal insuficiente; pode ser votação simbólica ou incompleta.');
  summary_(rows,yes,no); // validate the recorded votes before completing the roster
- let expected=h==='Câmara'?513:81;if(rows.length!==expected&&(h==='Câmara'||day===today())){rows=(await mergeRoster_(h,rows,day));criterion=h==='Câmara'?'Deputados em exercício consultados na data oficial da votação, reconciliados por ID; faltantes = sem voto. Em caso de substituição ou filiação divergente, a geração é bloqueada.':'Bancada atual da mesma data, reconciliada por ID; faltantes = sem voto';}else if(rows.length!==expected)throw Error('Lista histórica incompleta: '+rows.length+' de '+expected+'. Não usamos a bancada atual para datas antigas.');
- if(rows.length!==expected)throw Error('Cobertura incompleta.');const z=summary_(rows,yes,no);
- let parties=z.result.map(([p,b,n,s])=>[p,b,n,s,b-n-s,n/b,s/b,(b-n-s)/b]);let [b,n,s]=z.total;parties.push(['total',b,n,s,b-n-s,n/b,s/b,(b-n-s)/b]);
+ let expected=h==='Câmara'?513:81;
+ if(rows.length>expected)throw Error('Lista nominal excede '+expected+' parlamentares. Confira a fonte.');
+ if(rows.length!==expected&&(h==='Câmara'||day===today())){
+  try{
+   // Cópia para não alterar registros oficiais se a reconciliação falhar.
+   rows=await mergeRoster_(h,rows.map(r=>r.slice()),rosterDay);
+   criterion='Composição consultada em '+rosterDay+' e reconciliada por ID; faltantes = sem voto.';
+  }catch(e){rosterWarning=e.message;partial=true;}
+ }else if(rows.length!==expected){partial=true;rosterWarning='Lista histórica incompleta; a bancada atual não é utilizada para datas antigas.';}
+ if(rows.length!==expected)partial=true;
+ // Não publicar percentuais nem estimar ausentes sem uma composição compatível.
+ if(partial&&(yes===''||no===''))throw Error('Sem composição compatível e sem placar oficial para validar a lista. '+rosterWarning);
+ if(partial)criterion='RESULTADO PARCIAL — apenas registros oficiais de voto ('+rows.length+' de '+expected+' cadeiras). Bancadas, ausências e percentuais não calculados. '+rosterWarning;
+ const z=summary_(rows,yes,no);
+ const partyRow=(p,b,n,s)=>partial?[p,null,n,s,b-n-s,null,null,null]:[p,b,n,s,b-n-s,n/b,s/b,(b-n-s)/b];
+ let parties=z.result.map(([p,b,n,s])=>partyRow(p,b,n,s));let [b,n,s]=z.total;parties.push(partyRow('total',b,n,s));
  let nominal=nominalRows_(h,rows);let presidents=nominal.filter(r=>r[3].startsWith('art.')).map(r=>r[0]+' ('+r[1]+'-'+r[2]+') — '+r[3]);
- return {house:h,day,id,description,source,criterion,official:yes!==''&&no!=='',parties,nominal,presidents,checkedAt:new Date().toISOString()};
+ return {house:h,day,id,description,source,criterion,partial,rosterWarning,expected,recordCount:rows.length,official:yes!==''&&no!=='',parties,nominal,presidents,checkedAt:new Date().toISOString()};
 }
 
 return {listVotes,getVote};
