@@ -1,0 +1,9 @@
+COMO VOTOU V9 — acesso restrito
+
+1. Cloudflare > Workers & Pages > como-votou-api > Settings > Variables and secrets > Add variable. Tipo Secret; nome PANEL_PASSWORD; valor: a senha compartilhada escolhida. Deploy.
+2. Edit code > substitua todo o worker.js pelo conteúdo de worker.txt. Deploy.
+3. Teste https://como-votou-api.rafaelbqo.workers.dev/ em janela anônima: senha errada deve falhar, senha correta deve abrir o painel e Sair deve voltar ao login.
+4. GitHub: envie APENAS index.html na raiz para substituir a V8. Ele redireciona ao Worker. NÃO envie worker.txt/worker.js ao GitHub.
+5. Remova api.js, config.js e outros HTMLs antigos se não forem usados. O histórico público do repositório ainda pode conter as versões antigas. Os dados legislativos são públicos.
+
+A senha fica no Secret do Cloudflare, não no HTML público. A sessão dura 8 horas e usa cookie assinado HttpOnly/Secure. O limite de tentativas é local por instância, não uma proteção global. Senha compartilhada é adequada para teste interno de dados públicos, mas use uma senha longa e aleatória para maior segurança. Alterar a senha invalida sessões anteriores. O painel passa a ser servido pelo Worker, não pelo GitHub; o endereço anterior redireciona. Não é possível incorporar por iframe nesta versão.
